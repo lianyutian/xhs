@@ -1,0 +1,49 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/user}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:25}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+
+app:
+  security:
+    trusted-proxies: ${TRUSTED_PROXIES:}
+    jwt:
+      issuer: ${JWT_ISSUER:user-service}
+      secret: ${JWT_SECRET:DefaultVerificationCodeServiceDefaultVerificationCodeService}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT15M}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:P7D}
+    captcha:
+      image-ttl: ${CAPTCHA_IMAGE_TTL:PT5M}
+      email-ttl: ${CAPTCHA_EMAIL_TTL:PT10M}
+      max-attempts: ${CAPTCHA_MAX_ATTEMPTS:5}
+    risk:
+      login:
+        captcha-threshold: ${RISK_LOGIN_CAPTCHA_THRESHOLD:3}
+        temp-block-threshold: ${RISK_LOGIN_TEMP_BLOCK_THRESHOLD:6}
+        failure-ttl: ${RISK_LOGIN_FAILURE_TTL:PT15M}
+      image-captcha:
+        limit: ${RISK_IMAGE_CAPTCHA_LIMIT:10}
+        ttl: ${RISK_IMAGE_CAPTCHA_TTL:PT1M}
+      email-code:
+        limit: ${RISK_EMAIL_CODE_LIMIT:5}
+        ttl: ${RISK_EMAIL_CODE_TTL:PT10M}
+      refresh:
+        limit: ${RISK_REFRESH_LIMIT:8}
+        ttl: ${RISK_REFRESH_TTL:PT5M}
+      upload:
+        limit: ${RISK_UPLOAD_LIMIT:10}
+        ttl: ${RISK_UPLOAD_TTL:PT1M}
+        max-bytes: ${RISK_UPLOAD_MAX_BYTES:5242880}

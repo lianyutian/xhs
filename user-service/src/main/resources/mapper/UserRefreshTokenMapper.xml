@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lianyutian.xhs.user.repository.mybatis.UserRefreshTokenMapper">
+    <resultMap id="RefreshTokenResultMap" type="com.lianyutian.xhs.user.model.entity.UserRefreshTokenEntity">
+        <id column="id" property="id"/>
+        <result column="session_id" property="sessionId"/>
+        <result column="token_hash" property="tokenHash"/>
+        <result column="status" property="status"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.lianyutian.xhs.user.model.entity.UserRefreshTokenEntity">
+        insert into user_refresh_token(session_id, token_hash, status, expires_at, created_at, updated_at)
+        values(#{sessionId}, #{tokenHash}, #{status}, #{expiresAt}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findByTokenHash" resultMap="RefreshTokenResultMap">
+        select id, session_id, token_hash, status, expires_at, created_at, updated_at
+        from user_refresh_token
+        where token_hash = #{tokenHash}
+        limit 1
+    </select>
+
+    <update id="updateStatus">
+        update user_refresh_token
+        set status = #{status}, updated_at = #{updatedAt}
+        where id = #{id}
+    </update>
+
+    <update id="transitionToReplacedIfActive">
+        update user_refresh_token
+        set status = 'REPLACED', updated_at = #{updatedAt}
+        where id = #{id}
+          and status = 'ACTIVE'
+          and expires_at &gt;= #{updatedAt}
+    </update>
+
+    <update id="revokeActiveBySessionId">
+        update user_refresh_token
+        set status = 'REVOKED', updated_at = #{updatedAt}
+        where session_id = #{sessionId} and status = 'ACTIVE'
+    </update>
+</mapper>

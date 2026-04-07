@@ -1,0 +1,49 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:user_service;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+  mail:
+    host: localhost
+    port: 2525
+    username: test@example.com
+    password: test
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+
+app:
+  security:
+    trusted-proxies:
+    jwt:
+      issuer: test-user-service
+      secret: test-secret-at-least-32-characters-long
+      access-token-ttl: PT15M
+      refresh-token-ttl: P7D
+    captcha:
+      image-ttl: PT2M
+      email-ttl: PT10M
+      max-attempts: 5
+    risk:
+      login:
+        captcha-threshold: 3
+        temp-block-threshold: 6
+        failure-ttl: PT15M
+      image-captcha:
+        limit: 10
+        ttl: PT1M
+      email-code:
+        limit: 5
+        ttl: PT10M
+      refresh:
+        limit: 8
+        ttl: PT5M
+      upload:
+        limit: 10
+        ttl: PT1M
+        max-bytes: 5242880

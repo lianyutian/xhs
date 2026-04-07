@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lianyutian.xhs.user.repository.mybatis.VerificationCodeMapper">
+    <resultMap id="VerificationCodeResultMap" type="com.lianyutian.xhs.user.model.entity.VerificationCodeEntity">
+        <id column="id" property="id"/>
+        <result column="purpose" property="purpose"/>
+        <result column="target" property="target"/>
+        <result column="code_hash" property="codeHash"/>
+        <result column="status" property="status"/>
+        <result column="attempt_count" property="attemptCount"/>
+        <result column="max_attempts" property="maxAttempts"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.lianyutian.xhs.user.model.entity.VerificationCodeEntity" useGeneratedKeys="true" keyProperty="id">
+        insert into verification_code(purpose, target, code_hash, status, attempt_count, max_attempts, expires_at, created_at, updated_at)
+        values(#{purpose}, #{target}, #{codeHash}, #{status}, #{attemptCount}, #{maxAttempts}, #{expiresAt}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findLatestActive" resultMap="VerificationCodeResultMap">
+        select id, purpose, target, code_hash, status, attempt_count, max_attempts, expires_at, created_at, updated_at
+        from verification_code
+        where purpose = #{purpose} and target = #{target} and status = 'ACTIVE'
+        order by id desc
+        limit 1
+    </select>
+
+    <select id="findLatestVerifiable" resultMap="VerificationCodeResultMap">
+        select id, purpose, target, code_hash, status, attempt_count, max_attempts, expires_at, created_at, updated_at
+        from verification_code
+        where purpose = #{purpose}
+          and target = #{target}
+          and status in ('ACTIVE', 'SENT')
+        order by id desc
+        limit 1
+    </select>
+
+    <select id="findLatestByPurposeTarget" resultMap="VerificationCodeResultMap">
+        select id, purpose, target, code_hash, status, attempt_count, max_attempts, expires_at, created_at, updated_at
+        from verification_code
+        where purpose = #{purpose} and target = #{target}
+        order by id desc
+        limit 1
+    </select>
+
+    <update id="markActiveAsReplaced">
+        update verification_code
+        set status = 'REPLACED', updated_at = #{updatedAt}
+        where purpose = #{purpose} and target = #{target} and status = 'ACTIVE'
+    </update>
+
+    <update id="markVerifiableAsReplaced">
+        update verification_code
+        set status = 'REPLACED', updated_at = #{updatedAt}
+        where purpose = #{purpose} and target = #{target} and status in ('ACTIVE', 'SENT', 'PENDING_SEND')
+    </update>
+
+    <update id="markOlderVerifiableAsReplaced">
+        update verification_code
+        set status = 'REPLACED', updated_at = #{updatedAt}
+        where purpose = #{purpose}
+          and target = #{target}
+          and id &lt; #{currentId}
+          and status in ('ACTIVE', 'SENT', 'PENDING_SEND')
+    </update>
+
+    <update id="updateStatusAndAttempts">
+        update verification_code
+        set status = #{status}, attempt_count = #{attemptCount}, updated_at = #{updatedAt}
+        where id = #{id}
+    </update>
+
+    <update id="markExpiredIfVerifiable">
+        update verification_code
+        set status = 'EXPIRED', updated_at = #{updatedAt}
+        where id = #{id} and status in ('ACTIVE', 'SENT')
+    </update>
+
+    <update id="markFrozenIfVerifiable">
+        update verification_code
+        set status = 'FROZEN', updated_at = #{updatedAt}
+        where id = #{id} and status in ('ACTIVE', 'SENT')
+    </update>
+
+    <update id="incrementAttemptsAndMaybeFreeze">
+        update verification_code
+        set attempt_count = case
+            when attempt_count + 1 >= max_attempts then max_attempts
+            else attempt_count + 1
+        end,
+            status = case
+            when attempt_count + 1 >= max_attempts then 'FROZEN'
+            else 'ACTIVE'
+        end,
+            updated_at = #{updatedAt}
+        where id = #{id} and status in ('ACTIVE', 'SENT')
+    </update>
+
+    <update id="updateSendResultIfPending">
+        update verification_code
+        set status = #{status}, attempt_count = 0, updated_at = #{updatedAt}
+        where id = #{id} and status = 'PENDING_SEND'
+    </update>
+
+    <update id="markSendFailedIfPendingOrReplaced">
+        update verification_code
+        set status = 'SEND_FAILED', updated_at = #{updatedAt}
+        where id = #{id}
+          and status in ('PENDING_SEND', 'REPLACED')
+    </update>
+
+    <update id="consumeIfVerifiable">
+        update verification_code
+        set status = 'CONSUMED', updated_at = #{updatedAt}
+        where id = #{id}
+          and status in ('ACTIVE', 'SENT')
+          and expires_at &gt;= #{updatedAt}
+          and attempt_count &lt; max_attempts
+    </update>
+</mapper>
