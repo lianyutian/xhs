@@ -160,26 +160,38 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         return new EmailCodeIssueReceipt(requestId, issued.expiresAt(), issued.sent());
     }
 
+    /**
+     * 尝试在当前事务中消耗邮箱验证码（验证并标记为已使用）
+     *
+     * @param purpose 验证码用途（如注册、登录等）
+     * @param target 目标邮箱地址
+     * @param code 用户输入的验证码
+     * @return 验证码消耗尝试结果，包含成功状态或失败上下文信息
+     */
     public EmailCodeConsumeAttempt attemptConsumeEmailCodeInCurrentTransaction(VerificationCodePurpose purpose, String target, String code) {
+        // 评估验证码的有效性（检查状态、过期时间、匹配性等）
         VerificationEvaluation evaluation = evaluateCode(purpose, target, code);
         if (evaluation.decision() != VerificationDecision.MATCH) {
             return EmailCodeConsumeAttempt.failure(toFailureContext(evaluation));
         }
+
+        // 原子性操作：将验证码标记为 CONSUMED，防止并发重复使用
         boolean consumed = verificationCodeMapper.consumeIfVerifiable(evaluation.record().getId(), OffsetDateTime.now(ZoneOffset.UTC)) == 1;
         if (consumed) {
             return EmailCodeConsumeAttempt.success();
         }
+
+        // 验证码状态已变更，无法再被消耗
         return EmailCodeConsumeAttempt.failure(
             new VerificationFailureContext(evaluation.record().getId(), VerificationFailureReason.NOT_VERIFIABLE)
         );
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void recordFailedEmailCodeAttempt(VerificationCodePurpose purpose, String target, String code) {
-        VerificationEvaluation evaluation = evaluateCode(purpose, target, code);
-        applyFailureUpdate(toFailureContext(evaluation), OffsetDateTime.now(ZoneOffset.UTC));
-    }
-
+    /**
+     * 记录邮箱验证码验证失败尝试（在新事务中执行，确保独立提交）
+     *
+     * @param failureContext 包含验证码记录 ID 和失败原因的上下文对象
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordFailedEmailCodeAttempt(VerificationFailureContext failureContext) {
         applyFailureUpdate(failureContext, OffsetDateTime.now(ZoneOffset.UTC));
@@ -364,30 +376,57 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         MISMATCH
     }
 
+    /**
+     * 评估验证码的有效性，按顺序检查多个维度
+     *
+     * @param purpose 验证码用途（如注册、登录等）
+     * @param target 目标邮箱地址
+     * @param code 用户输入的验证码
+     * @return 包含验证码记录和验证决策的评估结果对象
+     */
     private VerificationEvaluation evaluateCode(VerificationCodePurpose purpose, String target, String code) {
+        // 查询最新的验证码记录
         VerificationCodeEntity record = verificationCodeMapper.findLatestByPurposeTarget(purpose.name(), target);
         if (record == null) {
             return new VerificationEvaluation(null, VerificationDecision.MISSING);
         }
+
+        // 检查验证码状态是否可验证（ACTIVE 或 SENT）
         if (record.getStatus() != VerificationCodeStatus.ACTIVE && record.getStatus() != VerificationCodeStatus.SENT) {
             return new VerificationEvaluation(record, VerificationDecision.NOT_VERIFIABLE);
         }
+
+        // 检查验证码是否已过期
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         if (record.getExpiresAt().isBefore(now)) {
             return new VerificationEvaluation(record, VerificationDecision.EXPIRED);
         }
+
+        // 检查尝试次数是否已达上限（冻结）
         if (record.getAttemptCount() >= record.getMaxAttempts()) {
             return new VerificationEvaluation(record, VerificationDecision.FROZEN);
         }
+
+        // 比对验证码哈希值
         if (!record.getCodeHash().equals(hash(code))) {
             return new VerificationEvaluation(record, VerificationDecision.MISMATCH);
         }
+
+        // 所有检查通过，验证码有效
         return new VerificationEvaluation(record, VerificationDecision.MATCH);
     }
 
+    /**
+     * 将验证码评估结果转换为失败上下文信息
+     *
+     * @param evaluation 验证码评估结果对象
+     * @return 包含记录 ID 和失败原因的上下文对象
+     */
     private VerificationFailureContext toFailureContext(VerificationEvaluation evaluation) {
         VerificationCodeEntity record = evaluation.record();
         Long recordId = record == null ? null : record.getId();
+
+        // 根据验证决策映射对应的失败原因
         VerificationFailureReason reason = switch (evaluation.decision()) {
             case MISSING -> VerificationFailureReason.MISSING;
             case NOT_VERIFIABLE -> VerificationFailureReason.NOT_VERIFIABLE;
@@ -399,10 +438,19 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         return new VerificationFailureContext(recordId, reason);
     }
 
+    /**
+     * 根据失败原因应用相应的数据库更新操作
+     *
+     * @param failureContext 包含验证码记录 ID 和失败原因的上下文对象
+     * @param now 当前时间戳
+     */
     private void applyFailureUpdate(VerificationFailureContext failureContext, OffsetDateTime now) {
+        // 忽略无效的失败上下文
         if (failureContext == null || failureContext.recordId() == null) {
             return;
         }
+
+        // 根据失败原因执行不同的状态更新
         if (failureContext.reason() == VerificationFailureReason.EXPIRED) {
             verificationCodeMapper.markExpiredIfVerifiable(failureContext.recordId(), now);
             return;
@@ -411,6 +459,8 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
             verificationCodeMapper.markFrozenIfVerifiable(failureContext.recordId(), now);
             return;
         }
+
+        // 验证码不匹配：增加尝试次数，达到上限则自动冻结
         if (failureContext.reason() == VerificationFailureReason.MISMATCH) {
             verificationCodeMapper.incrementAttemptsAndMaybeFreeze(failureContext.recordId(), now);
         }
@@ -446,12 +496,21 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         return throwable.getMessage();
     }
 
+    /**
+     * 验证码验证决策枚举，表示验证码评估的最终结果
+     */
     private enum VerificationDecision {
+        /** 验证码不存在或为空 */
         MISSING,
+        /** 验证码状态不可验证（如已使用、已替换等） */
         NOT_VERIFIABLE,
+        /** 验证码已过期 */
         EXPIRED,
+        /** 验证码已被冻结（异常锁定） */
         FROZEN,
+        /** 验证码答案不匹配 */
         MISMATCH,
+        /** 验证码验证通过 */
         MATCH
     }
 }

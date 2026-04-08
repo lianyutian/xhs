@@ -33,6 +33,12 @@ public class AuthController {
         this.sourceIpResolver = sourceIpResolver;
     }
 
+    /**
+     * 用户注册接口，通过邮箱和验证码完成注册
+     *
+     * @param request 包含邮箱、密码和验证码的注册请求对象
+     * @return 空响应对象
+     */
     @Operation(summary = "register by email and verification code")
     @PostMapping("/register")
     public ApiResponse<Void> register(@Valid @RequestBody RegisterRequest request) {

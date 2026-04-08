@@ -32,6 +32,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.UUID;
 import javax.crypto.SecretKey;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -83,11 +84,23 @@ public class DefaultAuthService implements AuthService {
         this.passwordEncoder = passwordEncoder;
     }
 
+    /**
+     * 用户注册功能
+     *
+     * @param email 用户邮箱地址
+     * @param password 用户密码（明文）
+     * @param registerCode 注册验证码
+     * @throws IllegalArgumentException 当邮箱已存在或验证码无效时抛出
+     * @throws IllegalStateException 当账户创建失败时抛出
+     */
     @Transactional
     public void register(String email, String password, String registerCode) {
+        // 检查邮箱是否已被注册
         if (userAccountMapper.findByEmail(email) != null) {
             throw new IllegalArgumentException("EMAIL_ALREADY_EXISTS");
         }
+
+        // 尝试消耗注册验证码并验证正确性
         DefaultVerificationCodeService.EmailCodeConsumeAttempt verificationAttempt =
             verificationCodeService.attemptConsumeEmailCodeInCurrentTransaction(
                 VerificationCodePurpose.REGISTER,
@@ -99,6 +112,7 @@ public class DefaultAuthService implements AuthService {
             throw new IllegalArgumentException("INVALID_REGISTER_CODE");
         }
 
+        // 创建用户账户记录，对密码进行加密存储
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         UserAccountEntity account = new UserAccountEntity(
             null,
@@ -108,11 +122,19 @@ public class DefaultAuthService implements AuthService {
             now,
             now
         );
-        userAccountMapper.insert(account);
+        try {
+            userAccountMapper.insert(account);
+        } catch (DuplicateKeyException ex) {
+            throw new IllegalArgumentException("EMAIL_ALREADY_EXISTS");
+        }
+
+        // 验证账户是否成功保存
         UserAccountEntity savedAccount = userAccountMapper.findByEmail(email);
         if (savedAccount == null) {
             throw new IllegalStateException("ACCOUNT_CREATE_FAILED");
         }
+
+        // 创建用户档案记录，默认用户名为邮箱前缀
         userProfileMapper.insert(new UserProfileEntity(
             null,
             savedAccount.getId(),

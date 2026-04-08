@@ -1,12 +1,16 @@
 package com.lianyutian.xhs.user.service.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.lianyutian.xhs.user.model.domain.VerificationCodePurpose;
+import com.lianyutian.xhs.user.model.entity.UserAccountEntity;
 import com.lianyutian.xhs.user.repository.mybatis.UserAccountMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserProfileMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserRefreshTokenMapper;
@@ -17,6 +21,7 @@ import com.lianyutian.xhs.user.service.risk.RiskControlService;
 import com.lianyutian.xhs.user.service.verification.DefaultVerificationCodeService;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class DefaultAuthServiceUnitTest {
@@ -54,5 +59,46 @@ class DefaultAuthServiceUnitTest {
 
         assertThat(result.errorCode()).isEqualTo("INVALID_CREDENTIALS");
         verify(passwordEncoder).matches(eq("Password123!"), anyString());
+    }
+
+    @Test
+    void shouldMapDuplicateEmailInsertRaceToBusinessError() {
+        DefaultVerificationCodeService verificationCodeService = mock(DefaultVerificationCodeService.class);
+        RiskControlService riskControlService = mock(RiskControlService.class);
+        SecurityEventRecorder securityEventRecorder = mock(SecurityEventRecorder.class);
+        UserAccountMapper userAccountMapper = mock(UserAccountMapper.class);
+        UserProfileMapper userProfileMapper = mock(UserProfileMapper.class);
+        UserSessionMapper userSessionMapper = mock(UserSessionMapper.class);
+        UserRefreshTokenMapper userRefreshTokenMapper = mock(UserRefreshTokenMapper.class);
+        PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+
+        when(userAccountMapper.findByEmail("race@example.com")).thenReturn(null);
+        when(verificationCodeService.attemptConsumeEmailCodeInCurrentTransaction(
+            eq(VerificationCodePurpose.REGISTER),
+            eq("race@example.com"),
+            eq("123456")
+        )).thenReturn(DefaultVerificationCodeService.EmailCodeConsumeAttempt.success());
+        when(passwordEncoder.encode("Password123!")).thenReturn("encoded");
+        when(userAccountMapper.insert(any(UserAccountEntity.class)))
+            .thenThrow(new DuplicateKeyException("duplicate email"));
+
+        DefaultAuthService authService = new DefaultAuthService(
+            verificationCodeService,
+            riskControlService,
+            securityEventRecorder,
+            Duration.ofMinutes(15),
+            Duration.ofDays(7),
+            "test-issuer",
+            "test-secret-at-least-32-characters-long",
+            userAccountMapper,
+            userProfileMapper,
+            userSessionMapper,
+            userRefreshTokenMapper,
+            passwordEncoder
+        );
+
+        assertThatThrownBy(() -> authService.register("race@example.com", "Password123!", "123456"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("EMAIL_ALREADY_EXISTS");
     }
 }
