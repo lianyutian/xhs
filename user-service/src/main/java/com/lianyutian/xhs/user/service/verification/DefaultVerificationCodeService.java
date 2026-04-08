@@ -69,19 +69,32 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         this.imageCaptchaProducer = imageCaptchaProducer;
     }
 
+    /**
+     * 创建图片验证码挑战
+     *
+     * @param scenario 验证码使用场景（如 LOGIN、REGISTER 等）
+     * @return 包含令牌、图片内容的验证码挑战对象
+     * @throws IllegalArgumentException 当场景不在支持列表中时抛出异常
+     */
     public ImageCaptchaChallenge createImageCaptcha(String scenario) {
+        // 标准化场景参数并验证有效性
         String normalizedScenario = scenario == null ? "" : scenario.trim().toUpperCase(Locale.ROOT);
         if (!SUPPORTED_CAPTCHA_SCENARIOS.contains(normalizedScenario)) {
             throw new IllegalArgumentException("INVALID_CAPTCHA_SCENARIO");
         }
+
+        // 生成唯一令牌和验证码文本
         String token = UUID.randomUUID().toString();
         String answer = imageCaptchaProducer.createText();
 
         log.info("Generated captcha for scenario %s: %s".formatted(normalizedScenario, answer));
         log.info("Captcha token: %s".formatted(token));
 
+        // 生成验证码图片并转换为 Base64 编码
         BufferedImage image = imageCaptchaProducer.createImage(answer);
         String imageContent = "data:image/png;base64," + encodePngBase64(image);
+
+        // 将验证码答案哈希后存储到 Redis，设置过期时间
         redisTemplate.opsForValue().set(
             redisKeyHelper.imageCaptcha(token),
             normalizedScenario + ":" + hash(answer),
@@ -94,21 +107,36 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         return verifyImageCaptcha(token, answer, null);
     }
 
+    /**
+     * 验证图片验证码答案是否正确
+     *
+     * @param token 验证码令牌
+     * @param answer 用户输入的验证码答案
+     * @param expectedScenario 预期的验证码使用场景（可选）
+     * @return 验证通过返回 true，否则返回 false
+     */
     public boolean verifyImageCaptcha(String token, String answer, String expectedScenario) {
+        // 从 Redis 中获取并删除验证码记录（一次性使用）
         String storedValue = redisTemplate.opsForValue().getAndDelete(redisKeyHelper.imageCaptcha(token));
         if (storedValue == null) {
             return false;
         }
+
+        // 解析存储的场景和哈希值
         int separator = storedValue.indexOf(':');
         if (separator <= 0 || separator == storedValue.length() - 1) {
             return false;
         }
         String storedScenario = storedValue.substring(0, separator);
         String storedHash = storedValue.substring(separator + 1);
+
+        // 验证场景是否匹配预期
         String normalizedExpectedScenario = normalizeScenario(expectedScenario);
         if (normalizedExpectedScenario != null && !normalizedExpectedScenario.equals(storedScenario)) {
             return false;
         }
+
+        // 比对答案的哈希值
         return storedHash.equals(hash(answer));
     }
 
@@ -116,8 +144,18 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         return issueEmailCodeInternal(purpose, target).code();
     }
 
+    /**
+     * 签发邮箱验证码并返回发送回执
+     *
+     * @param purpose 验证码用途（如注册、登录、找回密码等）
+     * @param target 目标邮箱地址
+     * @return 包含请求 ID、过期时间和发送状态的验证码签收回执对象
+     */
     public EmailCodeIssueReceipt issueEmailCodeWithReceipt(VerificationCodePurpose purpose, String target) {
+        // 调用内部方法生成验证码并尝试发送
         IssuedEmailCode issued = issueEmailCodeInternal(purpose, target);
+
+        // 确保请求 ID 不为空，如果缺失则生成新的 UUID
         String requestId = issued.requestId() == null ? UUID.randomUUID().toString() : issued.requestId().toString();
         return new EmailCodeIssueReceipt(requestId, issued.expiresAt(), issued.sent());
     }
@@ -178,13 +216,23 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         }
     }
 
+    /**
+     * 内部方法：签发邮箱验证码并处理发送结果
+     *
+     * @param purpose 验证码用途（如注册、登录、找回密码等）
+     * @param target 目标邮箱地址
+     * @return 已签发的邮箱验证码对象，包含验证码明文、ID、过期时间和发送状态
+     * @throws IllegalStateException 当验证码记录创建失败时抛出异常
+     */
     private IssuedEmailCode issueEmailCodeInternal(VerificationCodePurpose purpose, String target) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
+        // 生成 6 位随机数字验证码
         String code = Integer.toString(ThreadLocalRandom.current().nextInt(100000, 1000000));
 
         log.info("Generated email code for purpose {}, requestId {}", purpose, code);
 
+        // 创建验证码记录并持久化到数据库
         VerificationCodeEntity record = new VerificationCodeEntity(
             null,
             purpose,
@@ -203,9 +251,13 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         if (verificationCodeId == null) {
             throw new IllegalStateException("VERIFICATION_CODE_CREATE_FAILED");
         }
+
         log.info("Created email code request for purpose {}, requestId {}", purpose, verificationCodeId);
+
+        // 将同一目的和目标的旧验证码标记为 REPLACED，确保唯一有效性
         verificationCodeMapper.markOlderVerifiableAsReplaced(purpose.name(), target, verificationCodeId, now);
 
+        // 发送邮件并捕获异常
         boolean sent;
         try {
             mailSenderAdapter.send(target, "verification code", "code=" + code);
@@ -221,9 +273,12 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
                 Instant.now()
             ));
         }
+
+        // 根据发送结果更新数据库状态
         OffsetDateTime sendResultUpdatedAt = OffsetDateTime.now(ZoneOffset.UTC);
         boolean persistedAsSent = false;
         if (sent) {
+            // 尝试将状态更新为 SENT，如果失败则标记为 SEND_FAILED
             try {
                 int updatedRows = verificationCodeMapper.updateSendResultIfPending(
                     verificationCodeId,
@@ -259,6 +314,7 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
                 markSendFailedBestEffort(verificationCodeId, sendResultUpdatedAt);
             }
         } else {
+            // 发送失败，标记为 SEND_FAILED
             markSendFailedBestEffort(verificationCodeId, sendResultUpdatedAt);
         }
         return new IssuedEmailCode(
@@ -268,6 +324,9 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
             persistedAsSent
         );
     }
+
+    // ... existing code ...
+
 
     private String normalizeScenario(String scenario) {
         if (scenario == null) {

@@ -44,13 +44,24 @@ public class VerificationController {
         this.sourceIpResolver = sourceIpResolver;
     }
 
+    /**
+     * 生成图片验证码挑战
+     *
+     * @param scenario 验证码场景（如 LOGIN、REGISTER 等），默认为 LOGIN
+     * @param servletRequest HTTP 请求对象，用于获取客户端 IP 地址
+     * @return 包含验证码令牌和图片内容的响应对象
+     * @throws IllegalArgumentException 当请求频率超过限制时抛出异常
+     */
     @Operation(summary = "issue image captcha challenge")
     @GetMapping("/image-captcha")
     public ApiResponse<ImageCaptchaResponse> imageCaptcha(
         @RequestParam(defaultValue = "LOGIN") String scenario,
         HttpServletRequest servletRequest
     ) {
+        // 解析请求来源 IP 地址
         String sourceIp = sourceIpResolver.resolve(servletRequest);
+
+        // 风控检查：验证图片验证码生成频率是否超限
         if (!riskControlService.allowImageCaptchaIssue(sourceIp)) {
             eventRecorder.record(new SecurityEvent(
                 "RATE_LIMIT_HIT",
@@ -62,13 +73,24 @@ public class VerificationController {
             ));
             throw new IllegalArgumentException("IMAGE_CAPTCHA_RATE_LIMITED");
         }
+
+        // 创建图片验证码挑战并返回
         ImageCaptchaChallenge challenge = verificationCodeService.createImageCaptcha(scenario);
         return ApiResponse.ok(new ImageCaptchaResponse(challenge.token(), challenge.imageContent()));
     }
 
+    /**
+     * 发送邮箱验证码
+     *
+     * @param request 包含目标邮箱、验证码用途和图片验证码信息的请求对象
+     * @param servletRequest HTTP 请求对象，用于获取客户端 IP 地址
+     * @return 包含请求 ID 的响应对象
+     * @throws IllegalArgumentException 当参数无效、验证码错误或发送失败时抛出异常
+     */
     @Operation(summary = "issue email verification code")
     @PostMapping("/email-code")
     public ApiResponse<SendEmailCodeResponse> sendEmailCode(@Valid @RequestBody SendEmailCodeRequest request, HttpServletRequest servletRequest) {
+        // 解析并验证验证码用途枚举值
         VerificationCodePurpose purpose;
         try {
             purpose = VerificationCodePurpose.valueOf(request.purpose());
@@ -76,6 +98,7 @@ public class VerificationController {
             throw new IllegalArgumentException("INVALID_REQUEST");
         }
 
+        // 验证图片验证码是否通过
         boolean captchaPassed = request.captchaToken() != null
             && request.captchaAnswer() != null
             && verificationCodeService.verifyImageCaptcha(
@@ -87,6 +110,7 @@ public class VerificationController {
             throw new IllegalArgumentException("CAPTCHA_REQUIRED");
         }
 
+        // 风控检查：验证邮箱验证码发送频率是否超限
         String sourceIp = sourceIpResolver.resolve(servletRequest);
         if (!riskControlService.allowEmailCodeSend(sourceIp, request.targetEmail())) {
             eventRecorder.record(new SecurityEvent(
@@ -99,6 +123,8 @@ public class VerificationController {
             ));
             throw new IllegalArgumentException("EMAIL_CODE_RATE_LIMITED");
         }
+
+        // 签发邮箱验证码并返回结果
         DefaultVerificationCodeService.EmailCodeIssueReceipt receipt = verificationCodeService.issueEmailCodeWithReceipt(
             purpose,
             request.targetEmail()
