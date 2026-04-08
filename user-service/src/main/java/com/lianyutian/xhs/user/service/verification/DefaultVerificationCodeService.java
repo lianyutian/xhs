@@ -337,9 +337,6 @@ public class DefaultVerificationCodeService implements VerificationCodeService {
         );
     }
 
-    // ... existing code ...
-
-
     private String normalizeScenario(String scenario) {
         if (scenario == null) {
             return null;

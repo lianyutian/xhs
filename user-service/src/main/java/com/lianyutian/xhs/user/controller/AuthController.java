@@ -46,9 +46,17 @@ public class AuthController {
         return ApiResponse.ok(null);
     }
 
+    /**
+     * 用户登录接口，通过邮箱和密码进行身份验证
+     *
+     * @param request 包含邮箱、密码、验证码等登录信息的请求对象
+     * @param servletRequest HTTP 请求对象，用于获取客户端 IP 地址
+     * @return 包含访问令牌和刷新令牌的响应对象，登录失败时返回错误码
+     */
     @Operation(summary = "login by email and password")
     @PostMapping("/login")
     public ApiResponse<AuthTokenResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest servletRequest) {
+        // 调用认证服务执行登录流程
         AuthTokens tokens = authService.login(
             request.email(),
             request.password(),
@@ -57,6 +65,8 @@ public class AuthController {
             request.captchaToken(),
             request.captchaAnswer()
         );
+
+        // 根据认证结果返回相应的响应
         if (tokens.errorCode() != null) {
             return new ApiResponse<>(tokens.errorCode(), "auth failed", null);
         }

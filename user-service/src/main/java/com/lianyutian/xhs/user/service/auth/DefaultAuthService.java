@@ -149,6 +149,17 @@ public class DefaultAuthService implements AuthService {
         return login(email, password, sourceIp, userAgent, null, null);
     }
 
+    /**
+     * 用户登录功能，包含风控检查和会话管理
+     *
+     * @param email 用户邮箱地址
+     * @param password 用户密码（明文）
+     * @param sourceIp 请求来源 IP 地址
+     * @param userAgent 客户端 User-Agent 信息
+     * @param captchaToken 图片验证码令牌（风控触发时必填）
+     * @param captchaAnswer 图片验证码答案（风控触发时必填）
+     * @return 包含访问令牌和刷新令牌的 AuthTokens 对象，失败时返回错误码
+     */
     @Transactional
     public AuthTokens login(
         String email,
@@ -158,11 +169,14 @@ public class DefaultAuthService implements AuthService {
         String captchaToken,
         String captchaAnswer
     ) {
+        // 风控检查：评估登录风险等级并采取相应措施
         LoginRiskAction riskAction = riskControlService.currentLoginAction(sourceIp, email);
         if (riskAction == LoginRiskAction.TEMP_BLOCK) {
             eventRecorder.record(new SecurityEvent("RATE_LIMIT_HIT", null, null, sourceIp, "login_temp_blocked", Instant.now()));
             return AuthTokens.failure("LOGIN_TEMP_BLOCKED");
         }
+
+        // 需要人机验证时，检查验证码是否正确
         if (riskAction == LoginRiskAction.REQUIRE_CAPTCHA) {
             boolean captchaPassed = captchaToken != null
                 && captchaAnswer != null
@@ -181,6 +195,7 @@ public class DefaultAuthService implements AuthService {
             }
         }
 
+        // 验证用户凭证（邮箱和密码）
         UserAccountEntity account = userAccountMapper.findByEmail(email);
         String loginFailureReason = resolveLoginFailureReason(account, password);
         if (loginFailureReason != null) {
@@ -196,6 +211,7 @@ public class DefaultAuthService implements AuthService {
             return AuthTokens.failure("INVALID_CREDENTIALS");
         }
 
+        // 登录成功，重置失败计数并创建会话
         riskControlService.resetLoginFailures(sourceIp, email);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         UserSessionEntity session = new UserSessionEntity(
@@ -214,6 +230,7 @@ public class DefaultAuthService implements AuthService {
             throw new IllegalStateException("SESSION_CREATE_FAILED");
         }
 
+        // 生成访问令牌和刷新令牌
         String accessToken = buildAccessToken(account.getId(), sessionId, email);
         String refreshToken = UUID.randomUUID().toString();
         userRefreshTokenMapper.insert(new UserRefreshTokenEntity(
@@ -398,17 +415,31 @@ public class DefaultAuthService implements AuthService {
         }
     }
 
+    /**
+     * 解析登录失败的具体原因
+     *
+     * @param account 用户账户实体（可能为 null）
+     * @param password 用户输入的密码（明文）
+     * @return 失败原因描述字符串，登录成功返回 null
+     */
     private String resolveLoginFailureReason(UserAccountEntity account, String password) {
+        // 账户不存在，执行 dummy hash 计算以防止枚举攻击（保持耗时一致）
         if (account == null) {
             passwordEncoder.matches(password, DUMMY_PASSWORD_HASH);
             return "account_not_found";
         }
+
+        // 验证密码是否匹配
         if (!passwordEncoder.matches(password, account.getPasswordHash())) {
             return "password_mismatch";
         }
+
+        // 检查账户状态是否允许登录
         if (!account.getStatus().isLoginAllowed()) {
             return "account_status_" + account.getStatus().name().toLowerCase();
         }
+
+        // 凭证有效且账户状态正常
         return null;
     }
 

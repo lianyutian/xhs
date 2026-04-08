@@ -74,18 +74,32 @@ public class DefaultRiskControlService implements RiskControlService {
         this.uploadTtl = uploadTtl;
     }
 
+    /**
+     * 评估当前登录请求的风险等级并决定应采取的行动
+     *
+     * @param sourceIp 请求来源 IP 地址
+     * @param account 登录账号
+     * @return 登录风险行动决策：允许登录、要求验证码或临时封锁
+     */
     @Override
     public LoginRiskAction currentLoginAction(String sourceIp, String account) {
+        // 综合计算三种维度的失败次数：IP+账号组合、仅IP、仅账号，取最大值作为风险评估依据
         long failures = Math.max(
             counterValue(loginFailureCombinedKey(sourceIp, account)),
             Math.max(counterValue(loginFailureIpKey(sourceIp)), counterValue(loginFailureAccountKey(account)))
         );
+
+        // 失败次数达到临时封锁阈值，禁止登录
         if (failures >= tempBlockThreshold) {
             return LoginRiskAction.TEMP_BLOCK;
         }
+
+        // 失败次数达到验证码阈值，要求人机验证
         if (failures >= captchaThreshold) {
             return LoginRiskAction.REQUIRE_CAPTCHA;
         }
+
+        // 风险较低，允许正常登录
         return LoginRiskAction.ALLOW;
     }
 
