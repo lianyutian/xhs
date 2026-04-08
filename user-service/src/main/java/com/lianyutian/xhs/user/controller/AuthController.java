@@ -73,16 +73,32 @@ public class AuthController {
         return ApiResponse.ok(new AuthTokenResponse(tokens.accessToken(), tokens.refreshToken()));
     }
 
+    /**
+     * 令牌刷新接口，采用轮换机制生成新的访问令牌和刷新令牌
+     *
+     * @param request 包含当前刷新令牌的请求对象
+     * @param servletRequest HTTP 请求对象，用于获取客户端 IP 地址
+     * @return 包含新访问令牌和新刷新令牌的响应对象，失败时返回错误码
+     */
     @Operation(summary = "refresh token with rotation")
     @PostMapping("/refresh")
     public ApiResponse<AuthTokenResponse> refresh(@Valid @RequestBody RefreshRequest request, HttpServletRequest servletRequest) {
+        // 调用认证服务执行令牌刷新流程（包含重放检测和状态验证）
         AuthTokens tokens = authService.refresh(request.refreshToken(), sourceIpResolver.resolve(servletRequest));
+
+        // 根据刷新结果返回相应的响应
         if (tokens.errorCode() != null) {
             return new ApiResponse<>(tokens.errorCode(), "refresh failed", null);
         }
         return ApiResponse.ok(new AuthTokenResponse(tokens.accessToken(), tokens.refreshToken()));
     }
 
+    /**
+     * 用户登出接口，撤销当前会话及关联的刷新令牌
+     *
+     * @param authorization HTTP Authorization 请求头，格式为 "Bearer {token}"
+     * @return 空响应对象
+     */
     @Operation(summary = "logout current session")
     @PostMapping("/logout")
     public ApiResponse<Void> logout(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization) {
@@ -90,6 +106,12 @@ public class AuthController {
         return ApiResponse.ok(null);
     }
 
+    /**
+     * 获取当前登录用户信息接口
+     *
+     * @param authorization HTTP Authorization 请求头，格式为 "Bearer {token}"
+     * @return 包含用户 ID、邮箱和昵称的当前用户视图对象
+     */
     @Operation(summary = "get current user from access token")
     @GetMapping("/me")
     public ApiResponse<CurrentUserView> me(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization) {

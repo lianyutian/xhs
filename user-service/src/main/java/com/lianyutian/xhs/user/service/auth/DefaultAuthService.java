@@ -245,26 +245,44 @@ public class DefaultAuthService implements AuthService {
         return AuthTokens.success(accessToken, refreshToken);
     }
 
+    /**
+     * 刷新访问令牌和刷新令牌（采用轮换机制）
+     *
+     * @param refreshToken 当前的刷新令牌
+     * @param sourceIp 请求来源 IP 地址
+     * @return 包含新访问令牌和新刷新令牌的 AuthTokens 对象，失败时返回错误码
+     */
     @Transactional
     public AuthTokens refresh(String refreshToken, String sourceIp) {
+        // 对刷新令牌进行哈希处理
         String tokenHash = hash(refreshToken);
+
+        // 风控检查：防止刷新频率超限
         if (!riskControlService.allowRefresh(sourceIp, tokenHash)) {
             eventRecorder.record(new SecurityEvent("RATE_LIMIT_HIT", null, null, sourceIp, "refresh_rate_limited", Instant.now()));
             return AuthTokens.failure("REFRESH_RATE_LIMITED");
         }
+
+        // 查询当前刷新令牌实体并验证状态
         UserRefreshTokenEntity current = userRefreshTokenMapper.findByTokenHash(tokenHash);
         if (current == null) {
             recordRefreshReplay(null, sourceIp, "token_not_found");
             return AuthTokens.failure("INVALID_REFRESH_TOKEN");
         }
+
+        // 检测重放攻击：令牌已被替换
         if (current.getStatus() == RefreshTokenStatus.REPLACED) {
             recordRefreshReplay(current.getSessionId(), sourceIp, "token_status_replaced");
             return AuthTokens.failure("REFRESH_TOKEN_REPLAYED");
         }
+
+        // 检测会话撤销：令牌已被撤销
         if (current.getStatus() == RefreshTokenStatus.REVOKED) {
             recordRefreshReplay(current.getSessionId(), sourceIp, "token_status_revoked");
             return AuthTokens.failure("SESSION_REVOKED");
         }
+
+        // 检查令牌是否过期或状态异常
         OffsetDateTime nowUtc = OffsetDateTime.now(ZoneOffset.UTC);
         if (current.getStatus() != RefreshTokenStatus.ACTIVE || current.getExpiresAt().isBefore(nowUtc)) {
             String detail = current.getExpiresAt().isBefore(nowUtc)
@@ -274,10 +292,13 @@ public class DefaultAuthService implements AuthService {
             return AuthTokens.failure("INVALID_REFRESH_TOKEN");
         }
 
+        // 验证用户会话是否有效且处于活跃状态
         UserSessionEntity session = userSessionMapper.findById(current.getSessionId());
         if (session == null || session.getStatus() != SessionStatus.ACTIVE) {
             return AuthTokens.failure("SESSION_REVOKED");
         }
+
+        // 检查会话是否过期，过期则撤销会话及关联的所有令牌
         if (session.getExpiresAt().isBefore(nowUtc)) {
             userSessionMapper.updateStatus(session.getId(), SessionStatus.EXPIRED, nowUtc);
             userRefreshTokenMapper.revokeActiveBySessionId(session.getId(), nowUtc);
@@ -292,6 +313,7 @@ public class DefaultAuthService implements AuthService {
             return AuthTokens.failure("SESSION_REVOKED");
         }
 
+        // 验证账户是否存在且状态允许登录
         UserAccountEntity account = userAccountMapper.findById(session.getUserId());
         if (account == null) {
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -309,6 +331,7 @@ public class DefaultAuthService implements AuthService {
             return AuthTokens.failure("SESSION_REVOKED");
         }
 
+        // 原子性操作：将旧令牌标记为 REPLACED，防止重放攻击
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         int replacedRows = userRefreshTokenMapper.transitionToReplacedIfActive(current.getId(), now);
         if (replacedRows == 0) {
@@ -316,6 +339,7 @@ public class DefaultAuthService implements AuthService {
             return AuthTokens.failure("REFRESH_TOKEN_REPLAYED");
         }
 
+        // 生成新的刷新令牌并持久化
         String newRefreshToken = UUID.randomUUID().toString();
         userRefreshTokenMapper.insert(new UserRefreshTokenEntity(
             null,
@@ -326,25 +350,40 @@ public class DefaultAuthService implements AuthService {
             now,
             now
         ));
+
+        // 更新会话过期时间
         userSessionMapper.updateExpiresAt(session.getId(), now.plus(refreshTokenTtl), now);
 
+        // 构建新的访问令牌并返回
         String newAccessToken = buildAccessToken(session.getUserId(), session.getId(), account.getEmail());
         return AuthTokens.success(newAccessToken, newRefreshToken);
     }
 
+    /**
+     * 根据访问令牌获取当前登录用户的详细信息
+     *
+     * @param accessToken 有效的访问令牌
+     * @return 包含用户 ID、邮箱和昵称的当前用户视图对象
+     * @throws IllegalArgumentException 当会话无效、过期或账户状态异常时抛出 UNAUTHORIZED 异常
+     */
     public CurrentUserView currentUser(String accessToken) {
+        // 解析访问令牌并提取会话 ID 和用户 ID
         Claims claims = parseAccessToken(accessToken);
         Long sessionId = claims.get("sid", Long.class);
         Long userIdClaim = Long.parseLong(claims.getSubject());
 
+        // 验证会话是否存在、处于活跃状态且未过期
         UserSessionEntity session = userSessionMapper.findById(sessionId);
         if (session == null || session.getStatus() != SessionStatus.ACTIVE || session.getExpiresAt().isBefore(OffsetDateTime.now(ZoneOffset.UTC))) {
             throw new IllegalArgumentException("UNAUTHORIZED");
         }
+
+        // 校验令牌中的用户 ID 与会话关联的用户 ID 是否一致，防止令牌伪造
         if (!session.getUserId().equals(userIdClaim)) {
             throw new IllegalArgumentException("UNAUTHORIZED");
         }
 
+        // 验证账户是否存在且状态允许登录
         UserAccountEntity account = userAccountMapper.findById(session.getUserId());
         if (account == null) {
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -361,22 +400,37 @@ public class DefaultAuthService implements AuthService {
             );
             throw new IllegalArgumentException("UNAUTHORIZED");
         }
+
+        // 查询用户档案并返回视图信息
         UserProfileEntity profile = userProfileMapper.findByUserId(account.getId());
         return new CurrentUserView(account.getId(), account.getEmail(), profile == null ? "" : profile.getNickname());
     }
 
+    /**
+     * 用户登出功能，撤销会话及关联的所有刷新令牌
+     *
+     * @param accessToken 当前有效的访问令牌
+     */
     @Transactional
     public void logout(String accessToken) {
+        // 解析访问令牌获取会话 ID
         Claims claims = parseAccessToken(accessToken);
         Long sessionId = claims.get("sid", Long.class);
+
+        // 查询会话记录，如果不存在则直接返回
         UserSessionEntity session = userSessionMapper.findById(sessionId);
         if (session == null) {
             return;
         }
 
+        // 撤销会话状态并更新数据库
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         userSessionMapper.updateStatus(sessionId, SessionStatus.REVOKED, now);
+
+        // 撤销该会话下所有活跃的刷新令牌
         userRefreshTokenMapper.revokeActiveBySessionId(sessionId, now);
+
+        // 记录登出安全事件
         eventRecorder.record(new SecurityEvent("SESSION_REVOKED", session.getUserId(), sessionId, null, "logout", Instant.now()));
     }
 
