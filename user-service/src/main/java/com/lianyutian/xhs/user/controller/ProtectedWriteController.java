@@ -36,18 +36,32 @@ public class ProtectedWriteController {
         this.userAddressMapper = userAddressMapper;
     }
 
+    /**
+     * 地址写操作前的所有权校验接口
+     *
+     * @param authorization HTTP Authorization 请求头，格式为 "Bearer {token}"
+     * @param request 包含待校验地址 ID 的写操作请求对象
+     * @return 空响应对象，校验失败时抛出异常
+     */
     @Operation(summary = "validate address ownership before write")
     @PostMapping("/address/write")
     public ApiResponse<Void> writeAddress(
         @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
         @Valid @RequestBody AddressWriteRequest request
     ) {
+        // 获取当前登录用户信息
         CurrentUserView currentUser = authService.currentUser(extractBearerToken(authorization));
+
+        // 查询目标地址的所有者用户 ID
         Long ownerUserId = userAddressMapper.findOwnerUserIdByAddressId(request.addressId());
         String resourceId = "address:" + request.addressId();
+
+        // 如果地址不存在，执行拒绝逻辑（通常用于防止通过错误提示枚举资源）
         if (ownerUserId == null) {
             protectedWriteGuard.rejectOwnership(currentUser.userId(), resourceId);
         }
+
+        // 校验当前用户是否为地址所有者，非所有者将抛出异常
         protectedWriteGuard.assertOwnership(
             currentUser.userId(),
             ownerUserId,
