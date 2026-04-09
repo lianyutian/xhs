@@ -1,9 +1,104 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.lianyutian.xhs.user.repository.mybatis.UserAddressMapper">
+    <resultMap id="UserAddressResultMap" type="com.lianyutian.xhs.user.model.entity.UserAddressEntity">
+        <id column="address_id" property="addressId"/>
+        <result column="owner_user_id" property="ownerUserId"/>
+        <result column="recipient_name" property="recipientName"/>
+        <result column="recipient_phone" property="recipientPhone"/>
+        <result column="province" property="province"/>
+        <result column="city" property="city"/>
+        <result column="district" property="district"/>
+        <result column="detail_address" property="detailAddress"/>
+        <result column="postal_code" property="postalCode"/>
+        <result column="default_address" property="defaultAddress"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="deleted_at" property="deletedAt"/>
+    </resultMap>
+
+    <select id="countEffectiveByOwnerUserId" resultType="int">
+        select count(*)
+        from user_address
+        where owner_user_id = #{ownerUserId}
+          and deleted_at is null
+    </select>
+
+    <select id="findEffectiveByOwnerUserId" resultMap="UserAddressResultMap">
+        select address_id, owner_user_id, recipient_name, recipient_phone, province, city, district,
+               detail_address, postal_code, default_address, created_at, updated_at, deleted_at
+        from user_address
+        where owner_user_id = #{ownerUserId}
+          and deleted_at is null
+        order by default_address desc, updated_at desc, address_id desc
+    </select>
+
+    <select id="findEffectiveByAddressId" resultMap="UserAddressResultMap">
+        select address_id, owner_user_id, recipient_name, recipient_phone, province, city, district,
+               detail_address, postal_code, default_address, created_at, updated_at, deleted_at
+        from user_address
+        where address_id = #{addressId}
+          and deleted_at is null
+        limit 1
+    </select>
+
     <select id="findOwnerUserIdByAddressId" resultType="java.lang.Long">
         select owner_user_id
         from user_address
         where address_id = #{addressId}
+          and deleted_at is null
+        limit 1
+    </select>
+
+    <insert id="insert" parameterType="com.lianyutian.xhs.user.model.entity.UserAddressEntity" useGeneratedKeys="true" keyProperty="addressId">
+        insert into user_address(owner_user_id, recipient_name, recipient_phone, province, city, district, detail_address,
+                                 postal_code, default_address, created_at, updated_at, deleted_at)
+        values(#{ownerUserId}, #{recipientName}, #{recipientPhone}, #{province}, #{city}, #{district}, #{detailAddress},
+               #{postalCode}, #{defaultAddress}, #{createdAt}, #{updatedAt}, #{deletedAt})
+    </insert>
+
+    <update id="updateByAddressIdAndOwner" parameterType="com.lianyutian.xhs.user.model.entity.UserAddressEntity">
+        update user_address
+        set recipient_name = #{recipientName},
+            recipient_phone = #{recipientPhone},
+            province = #{province},
+            city = #{city},
+            district = #{district},
+            detail_address = #{detailAddress},
+            postal_code = #{postalCode},
+            default_address = #{defaultAddress},
+            updated_at = #{updatedAt}
+        where address_id = #{addressId}
+          and owner_user_id = #{ownerUserId}
+          and deleted_at is null
+    </update>
+
+    <update id="softDeleteByAddressIdAndOwner">
+        update user_address
+        set deleted_at = #{deletedAt},
+            updated_at = #{updatedAt},
+            default_address = 0
+        where address_id = #{addressId}
+          and owner_user_id = #{ownerUserId}
+          and deleted_at is null
+    </update>
+
+    <update id="clearDefaultByOwnerUserId">
+        update user_address
+        set default_address = 0,
+            updated_at = #{updatedAt}
+        where owner_user_id = #{ownerUserId}
+          and default_address = 1
+          and deleted_at is null
+    </update>
+
+    <select id="findDefaultCandidateByOwnerUserId" resultMap="UserAddressResultMap">
+        select address_id, owner_user_id, recipient_name, recipient_phone, province, city, district,
+               detail_address, postal_code, default_address, created_at, updated_at, deleted_at
+        from user_address
+        where owner_user_id = #{ownerUserId}
+          and deleted_at is null
+        order by updated_at desc, address_id desc
+        limit 1
     </select>
 </mapper>

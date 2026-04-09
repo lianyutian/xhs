@@ -29,7 +29,7 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
     void shouldAllowAddressWriteWhenOwnerMatchesAuthenticatedUser() {
         String accessToken = issueAccessToken("write-ok@example.com");
         Long userId = resolveUserId("write-ok@example.com");
-        jdbcTemplate.update("insert into user_address(address_id, owner_user_id) values (?, ?)", 1001L, userId);
+        insertAddress(1001L, userId);
         ApiResponse<Void> response = protectedWriteController.writeAddress(
             "Bearer " + accessToken,
             new AddressWriteRequest(1001L)
@@ -41,7 +41,7 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
     void shouldRejectAddressWriteWhenOwnerDoesNotMatch() {
         String accessToken = issueAccessToken("write-deny@example.com");
         Long realOwnerUserId = issueUser("write-real-owner@example.com");
-        jdbcTemplate.update("insert into user_address(address_id, owner_user_id) values (?, ?)", 2002L, realOwnerUserId);
+        insertAddress(2002L, realOwnerUserId);
         assertThatThrownBy(() -> protectedWriteController.writeAddress(
             "Bearer " + accessToken,
             new AddressWriteRequest(2002L)
@@ -54,7 +54,7 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
     void shouldRejectAddressWriteWhenClientSpoofsOwnerButAddressBelongsToAnotherUser() {
         String accessToken = issueAccessToken("attacker@example.com");
         Long victimUserId = issueUser("victim@example.com");
-        jdbcTemplate.update("insert into user_address(address_id, owner_user_id) values (?, ?)", 3003L, victimUserId);
+        insertAddress(3003L, victimUserId);
 
         assertThatThrownBy(() -> protectedWriteController.writeAddress(
             "Bearer " + accessToken,
@@ -147,5 +147,38 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
         String code = verificationCodeService.issueEmailCode(VerificationCodePurpose.REGISTER, email);
         authService.register(email, "Password123!", code);
         return resolveUserId(email);
+    }
+
+    private void insertAddress(Long addressId, Long ownerUserId) {
+        jdbcTemplate.update(
+            """
+                insert into user_address(
+                    address_id,
+                    owner_user_id,
+                    recipient_name,
+                    recipient_phone,
+                    province,
+                    city,
+                    district,
+                    detail_address,
+                    postal_code,
+                    default_address,
+                    created_at,
+                    updated_at,
+                    deleted_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                """,
+            addressId,
+            ownerUserId,
+            "name",
+            "13800000000",
+            "zhejiang",
+            "hangzhou",
+            "xihu",
+            "west lake road 1",
+            "310000",
+            false,
+            null
+        );
     }
 }

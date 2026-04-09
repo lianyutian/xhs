@@ -18,9 +18,19 @@ create table if not exists user_profile (
 );
 
 create table if not exists user_address (
-    address_id bigint primary key,
+    address_id bigint primary key auto_increment,
     owner_user_id bigint not null,
-    created_at timestamp not null default current_timestamp
+    recipient_name varchar(64) not null,
+    recipient_phone varchar(32) not null,
+    province varchar(64) not null,
+    city varchar(64) not null,
+    district varchar(64) not null,
+    detail_address varchar(255) not null,
+    postal_code varchar(32),
+    default_address tinyint(1) not null default 0,
+    created_at timestamp not null default current_timestamp,
+    updated_at timestamp not null default current_timestamp on update current_timestamp,
+    deleted_at timestamp null
 );
 
 create table if not exists user_session (
