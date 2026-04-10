@@ -3,14 +3,19 @@ package com.lianyutian.xhs.user.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.lianyutian.xhs.user.controller.request.AddressUpsertRequest;
 import com.lianyutian.xhs.user.controller.request.AddressWriteRequest;
 import com.lianyutian.xhs.user.controller.request.UploadRequest;
+import com.lianyutian.xhs.user.controller.response.AddressResponse;
 import com.lianyutian.xhs.user.service.auth.AuthTokens;
 import com.lianyutian.xhs.user.service.auth.DefaultAuthService;
 import com.lianyutian.xhs.user.controller.response.ApiResponse;
 import com.lianyutian.xhs.user.model.domain.VerificationCodePurpose;
+import com.lianyutian.xhs.user.repository.mybatis.UserAddressMapper;
+import com.lianyutian.xhs.user.service.address.AddressService;
 import com.lianyutian.xhs.user.support.AbstractDbIntegrationTest;
 import com.lianyutian.xhs.user.service.verification.DefaultVerificationCodeService;
+import java.lang.reflect.Field;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -18,6 +23,9 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
 
     @Autowired
     private ProtectedWriteController protectedWriteController;
+
+    @Autowired
+    private AddressController addressController;
 
     @Autowired
     private DefaultVerificationCodeService verificationCodeService;
@@ -28,23 +36,23 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
     @Test
     void shouldAllowAddressWriteWhenOwnerMatchesAuthenticatedUser() {
         String accessToken = issueAccessToken("write-ok@example.com");
-        Long userId = resolveUserId("write-ok@example.com");
-        insertAddress(1001L, userId);
+        Long addressId = createAddress(accessToken, "write-ok-address");
         ApiResponse<Void> response = protectedWriteController.writeAddress(
             "Bearer " + accessToken,
-            new AddressWriteRequest(1001L)
+            new AddressWriteRequest(addressId)
         );
         assertThat(response.code()).isEqualTo("OK");
     }
 
     @Test
     void shouldRejectAddressWriteWhenOwnerDoesNotMatch() {
-        String accessToken = issueAccessToken("write-deny@example.com");
-        Long realOwnerUserId = issueUser("write-real-owner@example.com");
-        insertAddress(2002L, realOwnerUserId);
+        String attackerAccessToken = issueAccessToken("write-deny@example.com");
+        String ownerAccessToken = issueAccessToken("write-real-owner@example.com");
+        Long addressId = createAddress(ownerAccessToken, "owner-only-address");
+
         assertThatThrownBy(() -> protectedWriteController.writeAddress(
-            "Bearer " + accessToken,
-            new AddressWriteRequest(2002L)
+            "Bearer " + attackerAccessToken,
+            new AddressWriteRequest(addressId)
         ))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("OWNERSHIP_VIOLATION");
@@ -53,12 +61,12 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
     @Test
     void shouldRejectAddressWriteWhenClientSpoofsOwnerButAddressBelongsToAnotherUser() {
         String accessToken = issueAccessToken("attacker@example.com");
-        Long victimUserId = issueUser("victim@example.com");
-        insertAddress(3003L, victimUserId);
+        String victimAccessToken = issueAccessToken("victim@example.com");
+        Long victimAddressId = createAddress(victimAccessToken, "victim-address");
 
         assertThatThrownBy(() -> protectedWriteController.writeAddress(
             "Bearer " + accessToken,
-            new AddressWriteRequest(3003L)
+            new AddressWriteRequest(victimAddressId)
         ))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("OWNERSHIP_VIOLATION");
@@ -80,6 +88,44 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
             Integer.class
         );
         assertThat(ownershipFailed).isEqualTo(1);
+    }
+
+    @Test
+    void shouldTreatSoftDeletedAddressAsOwnershipViolationWithEvent() {
+        String accessToken = issueAccessToken("deleted-address@example.com");
+        Long addressId = createAddress(accessToken, "to-delete");
+        addressController.deleteAddress("Bearer " + accessToken, addressId);
+
+        assertThatThrownBy(() -> protectedWriteController.writeAddress(
+            "Bearer " + accessToken,
+            new AddressWriteRequest(addressId)
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("OWNERSHIP_VIOLATION");
+
+        Integer ownershipFailed = jdbcTemplate.queryForObject(
+            "select count(*) from security_event where event_type='OWNERSHIP_FAILED' and detail=?",
+            Integer.class,
+            "resource=address:" + addressId
+        );
+        assertThat(ownershipFailed).isEqualTo(1);
+    }
+
+    @Test
+    void shouldDependOnAddressServiceInsteadOfMapperForOwnershipLookup() {
+        Field[] fields = ProtectedWriteController.class.getDeclaredFields();
+        boolean hasAddressServiceField = false;
+        boolean hasMapperField = false;
+        for (Field field : fields) {
+            if (field.getType() == AddressService.class) {
+                hasAddressServiceField = true;
+            }
+            if (field.getType() == UserAddressMapper.class) {
+                hasMapperField = true;
+            }
+        }
+        assertThat(hasAddressServiceField).isTrue();
+        assertThat(hasMapperField).isFalse();
     }
 
     @Test
@@ -139,46 +185,20 @@ class ProtectedWriteControllerContractTest extends AbstractDbIntegrationTest {
         return tokens.accessToken();
     }
 
-    private Long resolveUserId(String email) {
-        return jdbcTemplate.queryForObject("select id from user_account where email = ?", Long.class, email);
-    }
-
-    private Long issueUser(String email) {
-        String code = verificationCodeService.issueEmailCode(VerificationCodePurpose.REGISTER, email);
-        authService.register(email, "Password123!", code);
-        return resolveUserId(email);
-    }
-
-    private void insertAddress(Long addressId, Long ownerUserId) {
-        jdbcTemplate.update(
-            """
-                insert into user_address(
-                    address_id,
-                    owner_user_id,
-                    recipient_name,
-                    recipient_phone,
-                    province,
-                    city,
-                    district,
-                    detail_address,
-                    postal_code,
-                    default_address,
-                    created_at,
-                    updated_at,
-                    deleted_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-                """,
-            addressId,
-            ownerUserId,
-            "name",
-            "13800000000",
-            "zhejiang",
-            "hangzhou",
-            "xihu",
-            "west lake road 1",
-            "310000",
-            false,
-            null
+    private Long createAddress(String accessToken, String detailAddress) {
+        ApiResponse<AddressResponse> response = addressController.createAddress(
+            "Bearer " + accessToken,
+            new AddressUpsertRequest(
+                "name",
+                "13800000000",
+                "zhejiang",
+                "hangzhou",
+                "xihu",
+                detailAddress,
+                "310000",
+                false
+            )
         );
+        return response.data().addressId();
     }
 }

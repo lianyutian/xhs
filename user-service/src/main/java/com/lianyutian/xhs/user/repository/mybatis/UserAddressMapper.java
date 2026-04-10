@@ -32,6 +32,4 @@ public interface UserAddressMapper {
         @Param("ownerUserId") Long ownerUserId,
         @Param("updatedAt") OffsetDateTime updatedAt
     );
-
-    UserAddressEntity findDefaultCandidateByOwnerUserId(@Param("ownerUserId") Long ownerUserId);
 }

@@ -12,4 +12,6 @@ public interface UserAccountMapper {
     UserAccountEntity findByEmail(@Param("email") String email);
 
     UserAccountEntity findById(@Param("id") Long id);
+
+    Long lockById(@Param("id") Long id);
 }

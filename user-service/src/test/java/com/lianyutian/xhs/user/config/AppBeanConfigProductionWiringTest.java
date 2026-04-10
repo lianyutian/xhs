@@ -8,6 +8,7 @@ import com.lianyutian.xhs.user.service.integration.mail.MailSenderAdapter;
 import com.lianyutian.xhs.user.service.integration.mail.SpringMailSenderAdapter;
 import com.lianyutian.xhs.user.repository.mybatis.SecurityEventMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserAccountMapper;
+import com.lianyutian.xhs.user.repository.mybatis.UserAddressMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserProfileMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserRefreshTokenMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserSessionMapper;
@@ -35,6 +36,7 @@ class AppBeanConfigProductionWiringTest {
             context.registerBean(SecurityEventMapper.class, () -> stub(SecurityEventMapper.class));
             context.registerBean(VerificationCodeMapper.class, () -> stub(VerificationCodeMapper.class));
             context.registerBean(UserAccountMapper.class, () -> stub(UserAccountMapper.class));
+            context.registerBean(UserAddressMapper.class, () -> stub(UserAddressMapper.class));
             context.registerBean(UserProfileMapper.class, () -> stub(UserProfileMapper.class));
             context.registerBean(UserSessionMapper.class, () -> stub(UserSessionMapper.class));
             context.registerBean(UserRefreshTokenMapper.class, () -> stub(UserRefreshTokenMapper.class));

@@ -28,4 +28,12 @@
         where id = #{id}
         limit 1
     </select>
+
+    <select id="lockById" resultType="java.lang.Long">
+        select id
+        from user_account
+        where id = #{id}
+        limit 1
+        for update
+    </select>
 </mapper>

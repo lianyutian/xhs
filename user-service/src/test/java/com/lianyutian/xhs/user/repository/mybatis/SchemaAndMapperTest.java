@@ -52,7 +52,9 @@ class SchemaAndMapperTest {
 
     @Test
     void shouldProvideSqlMappingsForCoreInsertions() throws Exception {
-        assertThat(readMapper("mapper/UserAccountMapper.xml")).contains("<insert id=\"insert\"");
+        assertThat(readMapper("mapper/UserAccountMapper.xml"))
+            .contains("<insert id=\"insert\"")
+            .contains("<select id=\"lockById\"");
         assertThat(readMapper("mapper/UserProfileMapper.xml")).contains("<insert id=\"insert\"");
         assertThat(readMapper("mapper/UserAddressMapper.xml"))
             .contains("<select id=\"countEffectiveByOwnerUserId\"")
@@ -62,8 +64,7 @@ class SchemaAndMapperTest {
             .contains("<insert id=\"insert\"")
             .contains("<update id=\"updateByAddressIdAndOwner\"")
             .contains("<update id=\"softDeleteByAddressIdAndOwner\"")
-            .contains("<update id=\"clearDefaultByOwnerUserId\"")
-            .contains("<select id=\"findDefaultCandidateByOwnerUserId\"");
+            .contains("<update id=\"clearDefaultByOwnerUserId\"");
         assertThat(readMapper("mapper/UserSessionMapper.xml")).contains("<insert id=\"insert\"");
         assertThat(readMapper("mapper/UserRefreshTokenMapper.xml")).contains("<insert id=\"insert\"");
         assertThat(readMapper("mapper/VerificationCodeMapper.xml")).contains("<insert id=\"insert\"");

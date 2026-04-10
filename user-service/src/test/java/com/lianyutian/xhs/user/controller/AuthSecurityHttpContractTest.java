@@ -1,8 +1,10 @@
 package com.lianyutian.xhs.user.controller;
 
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -147,6 +149,163 @@ class AuthSecurityHttpContractTest extends AbstractDbIntegrationTest {
     }
 
     @Test
+    void shouldRejectAddressEndpointsWhenTokenMissing() throws Exception {
+        mockMvc.perform(get("/api/v1/addresses"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+            .andExpect(jsonPath("$.message").value("unauthorized"));
+    }
+
+    @Test
+    void shouldAllowCreateAddressAndReturnFullAddressWhenAuthenticated() throws Exception {
+        String accessToken = issueAccessToken("http-address@example.com");
+
+        mockMvc.perform(post("/api/v1/addresses")
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "recipientName": "name",
+                      "recipientPhone": "13800000000",
+                      "province": "zhejiang",
+                      "city": "hangzhou",
+                      "district": "xihu",
+                      "detailAddress": "xihu road 1",
+                      "postalCode": "310000",
+                      "defaultAddress": false
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"))
+            .andExpect(jsonPath("$.data.addressId").isNumber())
+            .andExpect(jsonPath("$.data.recipientName").value("name"))
+            .andExpect(jsonPath("$.data.recipientPhone").value("13800000000"))
+            .andExpect(jsonPath("$.data.province").value("zhejiang"))
+            .andExpect(jsonPath("$.data.city").value("hangzhou"))
+            .andExpect(jsonPath("$.data.district").value("xihu"))
+            .andExpect(jsonPath("$.data.detailAddress").value("xihu road 1"))
+            .andExpect(jsonPath("$.data.postalCode").value("310000"))
+            .andExpect(jsonPath("$.data.defaultAddress").value(true))
+            .andExpect(jsonPath("$.data.createdAt").isString())
+            .andExpect(jsonPath("$.data.updatedAt").isString());
+    }
+
+    @Test
+    void shouldSupportUpdateAndDeleteAddressViaHttp() throws Exception {
+        String accessToken = issueAccessToken("http-address-update-delete@example.com");
+        long addressId = createAddressAndReturnId(accessToken, "xihu road update target");
+
+        mockMvc.perform(put("/api/v1/addresses/{addressId}", addressId)
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "recipientName": "updated-name",
+                      "recipientPhone": "13900000000",
+                      "province": "jiangsu",
+                      "city": "nanjing",
+                      "district": "gulou",
+                      "detailAddress": "gulou road 9",
+                      "postalCode": "210000",
+                      "defaultAddress": true
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"))
+            .andExpect(jsonPath("$.data.addressId").value(addressId))
+            .andExpect(jsonPath("$.data.recipientName").value("updated-name"))
+            .andExpect(jsonPath("$.data.recipientPhone").value("13900000000"))
+            .andExpect(jsonPath("$.data.detailAddress").value("gulou road 9"))
+            .andExpect(jsonPath("$.data.defaultAddress").value(true));
+
+        mockMvc.perform(delete("/api/v1/addresses/{addressId}", addressId)
+                .header("Authorization", "Bearer " + accessToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"));
+
+        mockMvc.perform(get("/api/v1/addresses")
+                .header("Authorization", "Bearer " + accessToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"))
+            .andExpect(jsonPath("$.data.length()").value(0));
+    }
+
+    @Test
+    void shouldRejectAddressPutAndDeleteWhenOwnershipViolationViaHttp() throws Exception {
+        String ownerToken = issueAccessToken("http-address-owner@example.com");
+        long addressId = createAddressAndReturnId(ownerToken, "owner-only-address");
+        String attackerToken = issueAccessToken("http-address-attacker@example.com");
+
+        mockMvc.perform(put("/api/v1/addresses/{addressId}", addressId)
+                .header("Authorization", "Bearer " + attackerToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "recipientName": "hijack",
+                      "recipientPhone": "13800000000",
+                      "province": "zhejiang",
+                      "city": "hangzhou",
+                      "district": "xihu",
+                      "detailAddress": "hijack road",
+                      "postalCode": "310000",
+                      "defaultAddress": true
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OWNERSHIP_VIOLATION"));
+
+        mockMvc.perform(delete("/api/v1/addresses/{addressId}", addressId)
+                .header("Authorization", "Bearer " + attackerToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OWNERSHIP_VIOLATION"));
+    }
+
+    @Test
+    void shouldSupportProtectedAddressWriteViaHttp() throws Exception {
+        String accessToken = issueAccessToken("http-protected-write@example.com");
+        long addressId = createAddressAndReturnId(accessToken, "protected-write-self");
+
+        mockMvc.perform(post("/api/v1/protected/address/write")
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "addressId": %d
+                    }
+                    """.formatted(addressId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"));
+    }
+
+    @Test
+    void shouldRejectProtectedAddressWriteWhenOwnershipViolationOrValidationFailedViaHttp() throws Exception {
+        String ownerToken = issueAccessToken("http-protected-owner@example.com");
+        long addressId = createAddressAndReturnId(ownerToken, "protected-owner-only");
+        String attackerToken = issueAccessToken("http-protected-attacker@example.com");
+
+        mockMvc.perform(post("/api/v1/protected/address/write")
+                .header("Authorization", "Bearer " + attackerToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "addressId": %d
+                    }
+                    """.formatted(addressId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OWNERSHIP_VIOLATION"));
+
+        mockMvc.perform(post("/api/v1/protected/address/write")
+                .header("Authorization", "Bearer " + attackerToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
     void shouldMaskDuplicateRegisterAsInvalidRegisterCode() throws Exception {
         String email = "duplicate-register@example.com";
         String firstCode = verificationCodeService.issueEmailCode(VerificationCodePurpose.REGISTER, email);
@@ -164,6 +323,31 @@ class AuthSecurityHttpContractTest extends AbstractDbIntegrationTest {
                     """.formatted(email, secondCode)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value("INVALID_REGISTER_CODE"));
+    }
+
+    private long createAddressAndReturnId(String accessToken, String detailAddress) throws Exception {
+        mockMvc.perform(post("/api/v1/addresses")
+                .header("Authorization", "Bearer " + accessToken)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "recipientName": "name",
+                      "recipientPhone": "13800000000",
+                      "province": "zhejiang",
+                      "city": "hangzhou",
+                      "district": "xihu",
+                      "detailAddress": "%s",
+                      "postalCode": "310000",
+                      "defaultAddress": false
+                    }
+                    """.formatted(detailAddress)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value("OK"));
+        return jdbcTemplate.queryForObject(
+            "select address_id from user_address where detail_address = ? order by address_id desc limit 1",
+            Long.class,
+            detailAddress
+        );
     }
 
     private String issueAccessToken(String email) {

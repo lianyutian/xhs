@@ -65,6 +65,17 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    void shouldExposeAddressLimitExceededCode() {
+        ApiExceptionHandler handler = new ApiExceptionHandler();
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/addresses");
+        request.setRemoteAddr("127.0.0.1");
+
+        ApiResponse<Void> response = handler.handleIllegalArgument(request, new IllegalArgumentException("ADDRESS_LIMIT_EXCEEDED"));
+
+        assertThat(response.code()).isEqualTo("ADDRESS_LIMIT_EXCEEDED");
+    }
+
+    @Test
     void shouldHandleUnexpectedExceptionWithUnifiedErrorCode() {
         ApiExceptionHandler handler = new ApiExceptionHandler();
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/auth/me");

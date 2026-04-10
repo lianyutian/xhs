@@ -28,6 +28,7 @@ public class ApiExceptionHandler {
         "IMAGE_CAPTCHA_RATE_LIMITED",
         "EMAIL_CODE_RATE_LIMITED",
         "EMAIL_CODE_SEND_FAILED",
+        "ADDRESS_LIMIT_EXCEEDED",
         "OWNERSHIP_VIOLATION",
         "UPLOAD_RATE_LIMITED",
         "UPLOAD_TYPE_REJECTED",

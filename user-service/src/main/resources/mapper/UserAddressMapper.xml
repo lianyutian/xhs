@@ -92,13 +92,4 @@
           and deleted_at is null
     </update>
 
-    <select id="findDefaultCandidateByOwnerUserId" resultMap="UserAddressResultMap">
-        select address_id, owner_user_id, recipient_name, recipient_phone, province, city, district,
-               detail_address, postal_code, default_address, created_at, updated_at, deleted_at
-        from user_address
-        where owner_user_id = #{ownerUserId}
-          and deleted_at is null
-        order by updated_at desc, address_id desc
-        limit 1
-    </select>
 </mapper>

@@ -11,10 +11,12 @@ import com.lianyutian.xhs.user.service.integration.mail.MailSenderAdapter;
 import com.lianyutian.xhs.user.service.integration.mail.SpringMailSenderAdapter;
 import com.lianyutian.xhs.user.repository.mybatis.SecurityEventMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserAccountMapper;
+import com.lianyutian.xhs.user.repository.mybatis.UserAddressMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserProfileMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserRefreshTokenMapper;
 import com.lianyutian.xhs.user.repository.mybatis.UserSessionMapper;
 import com.lianyutian.xhs.user.repository.mybatis.VerificationCodeMapper;
+import com.lianyutian.xhs.user.service.address.DefaultAddressService;
 import com.lianyutian.xhs.user.service.risk.DefaultRiskControlService;
 import com.lianyutian.xhs.user.service.risk.ProtectedWriteGuard;
 import com.lianyutian.xhs.user.service.risk.RedisKeyHelper;
@@ -186,5 +188,10 @@ public class AppBeanConfig {
             userRefreshTokenMapper,
             passwordEncoder
         );
+    }
+
+    @Bean
+    public DefaultAddressService defaultAddressService(UserAccountMapper userAccountMapper, UserAddressMapper userAddressMapper) {
+        return new DefaultAddressService(userAccountMapper, userAddressMapper);
     }
 }

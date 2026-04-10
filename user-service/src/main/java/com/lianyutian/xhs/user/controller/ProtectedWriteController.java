@@ -5,7 +5,7 @@ import com.lianyutian.xhs.user.controller.request.UploadRequest;
 import com.lianyutian.xhs.user.service.auth.CurrentUserView;
 import com.lianyutian.xhs.user.service.auth.DefaultAuthService;
 import com.lianyutian.xhs.user.controller.response.ApiResponse;
-import com.lianyutian.xhs.user.repository.mybatis.UserAddressMapper;
+import com.lianyutian.xhs.user.service.address.AddressService;
 import com.lianyutian.xhs.user.service.risk.ProtectedWriteGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,16 +24,16 @@ public class ProtectedWriteController {
 
     private final DefaultAuthService authService;
     private final ProtectedWriteGuard protectedWriteGuard;
-    private final UserAddressMapper userAddressMapper;
+    private final AddressService addressService;
 
     public ProtectedWriteController(
         DefaultAuthService authService,
         ProtectedWriteGuard protectedWriteGuard,
-        UserAddressMapper userAddressMapper
+        AddressService addressService
     ) {
         this.authService = authService;
         this.protectedWriteGuard = protectedWriteGuard;
-        this.userAddressMapper = userAddressMapper;
+        this.addressService = addressService;
     }
 
     /**
@@ -52,21 +52,15 @@ public class ProtectedWriteController {
         // 获取当前登录用户信息
         CurrentUserView currentUser = authService.currentUser(extractBearerToken(authorization));
 
-        // 查询目标地址的所有者用户 ID
-        Long ownerUserId = userAddressMapper.findOwnerUserIdByAddressId(request.addressId());
         String resourceId = "address:" + request.addressId();
-
-        // 如果地址不存在，执行拒绝逻辑（通常用于防止通过错误提示枚举资源）
-        if (ownerUserId == null) {
-            protectedWriteGuard.rejectOwnership(currentUser.userId(), resourceId);
+        try {
+            addressService.requireOwnedAddress(currentUser.userId(), request.addressId());
+        } catch (IllegalArgumentException ex) {
+            if ("OWNERSHIP_VIOLATION".equals(ex.getMessage())) {
+                protectedWriteGuard.rejectOwnership(currentUser.userId(), resourceId);
+            }
+            throw ex;
         }
-
-        // 校验当前用户是否为地址所有者，非所有者将抛出异常
-        protectedWriteGuard.assertOwnership(
-            currentUser.userId(),
-            ownerUserId,
-            resourceId
-        );
         return ApiResponse.ok(null);
     }
 

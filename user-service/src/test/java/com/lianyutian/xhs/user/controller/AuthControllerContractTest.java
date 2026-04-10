@@ -151,6 +151,10 @@ class AuthControllerContractTest extends AbstractDbIntegrationTest {
         assertThat(hasOperationAnnotation(AuthController.class, "login")).isTrue();
         assertThat(hasOperationAnnotation(AuthController.class, "refresh")).isTrue();
         assertThat(hasOperationAnnotation(VerificationController.class, "sendEmailCode")).isTrue();
+        assertThat(hasOperationAnnotation(AddressController.class, "listAddresses")).isTrue();
+        assertThat(hasOperationAnnotation(AddressController.class, "createAddress")).isTrue();
+        assertThat(hasOperationAnnotation(AddressController.class, "updateAddress")).isTrue();
+        assertThat(hasOperationAnnotation(AddressController.class, "deleteAddress")).isTrue();
         assertThat(hasOperationAnnotation(ProtectedWriteController.class, "writeAddress")).isTrue();
         assertThat(hasOperationAnnotation(ProtectedWriteController.class, "upload")).isTrue();
     }
