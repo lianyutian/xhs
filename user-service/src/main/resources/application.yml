@@ -19,6 +19,8 @@ mybatis:
 
 app:
   security:
+    cors:
+      allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
     trusted-proxies: ${TRUSTED_PROXIES:}
     jwt:
       issuer: ${JWT_ISSUER:user-service}
